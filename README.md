@@ -1,4 +1,3 @@
-#H1 Readme
-
 SAXS_toolbox is a flexible platform dedicated to analyis of X-ray scattering images (SAXS, WAXS, diffraction,...). 
-Check Documentation and tutorial for more information
+It is developped in Python 3 and is based on pyFAI library.
+Check Documentation and tutorial for more information.
