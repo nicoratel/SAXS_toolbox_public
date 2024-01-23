@@ -10,6 +10,8 @@ import math
 from matplotlib import pyplot as plt
 from PyQt5.QtGui import QColor
 from PyQt5 import QtCore, QtGui, QtWidgets
+from pyFAI.azimuthalIntegrator import AzimuthalIntegrator
+import pyFAI, pyFAI.detectors
 
 
 class Ui_SAXS_TOOLBOX(object):
@@ -702,6 +704,8 @@ class Ui_SAXS_TOOLBOX(object):
         self.actionfrom_ID02_SAXS.setObjectName("actionfrom_ID02_SAXS")
         self.actionfrom_ID02_WAXS = QtWidgets.QAction(SAXS_TOOLBOX)
         self.actionfrom_ID02_WAXS.setObjectName("actionfrom_ID02_WAXS")
+        self.actionBatch_radial_profile_plot = QtWidgets.QAction(SAXS_TOOLBOX)
+        self.actionBatch_radial_profile_plot.setObjectName("actionBatch_radial_profile_plot")
         self.menuFile.addAction(self.actionSet_Working_Directory)
         self.menuFile.addAction(self.actionInitialize_Form)
         self.menuGenerate_mask.addAction(self.actionfrom_scratch)
@@ -719,6 +723,7 @@ class Ui_SAXS_TOOLBOX(object):
         self.menuConvert_nxs_h5.addAction(self.actionfrom_ID02_WAXS)
         self.menuTools.addAction(self.actionAverage_frames_2)
         self.menuTools.addAction(self.menuConvert_nxs_h5.menuAction())
+        self.menuTools.addAction(self.actionBatch_radial_profile_plot)
         self.menubar.addAction(self.menuFile.menuAction())
         self.menubar.addAction(self.menupyFAI.menuAction())
         self.menubar.addAction(self.menuInspect_data.menuAction())
@@ -844,7 +849,7 @@ class Ui_SAXS_TOOLBOX(object):
         self.actionfrom_ID15_2.setText(_translate("SAXS_TOOLBOX", "from ID15"))
         self.actionfrom_ID02_SAXS.setText(_translate("SAXS_TOOLBOX", "from ID02_SAXS"))
         self.actionfrom_ID02_WAXS.setText(_translate("SAXS_TOOLBOX", "from ID02_WAXS"))
-
+        self.actionBatch_radial_profile_plot.setText(_translate("SAXS_TOOLBOX", "Batch_radial-profile & plot"))
         
 #variable initialization for verification of provided files 
 a=0
@@ -930,6 +935,8 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         self.ui.actionfrom_ID02_SAXS.triggered.connect(self.nxs2edf_id02saxs)
         self.ui.actionfrom_ID02_WAXS.triggered.connect(self.nxs2edf_id02waxs)
         self.ui.actionAverage_frames_2.triggered.connect(self.average)
+        
+        self.ui.actionBatch_radial_profile_plot.triggered.connect(self.batch_regroup_plot)
         
         # intialize keys
         self.ui.key_wl_lineEdit.setText("WaveLength")
@@ -1085,12 +1092,9 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                     shape=np.shape(data)
                     # check for headr info
                     target=group+'/instrument/pilatus/detector_information/pixel_size/'
-                    # get distance and convert from mm to m
-                    #distance_m=(f[target+'/distance'][0])/1000
+                    
                     pixel_size_x=f[target+'/xsize'][()]
                     pixel_size_z=f[target+'/ysize'][()]
-                    #x_center=f[target+'/dir_beam_x'][0]
-                    #z_center=f[target+'/dir_beam_z'][0]
                     num_pixel_x=shape[1]
                     num_pixel_z=shape[2]
                                     
@@ -1120,70 +1124,74 @@ class ApplicationWindow(QtWidgets.QMainWindow):
     def nxs2edf_id02saxs(self):
         self.nxs_files=QtWidgets.QFileDialog.getOpenFileNames( self,"Open image file(s)","%s"%self.path)
         file_list=self.nxs_files[0]
-        try:
-            file=file_list[0]
-            directory=os.path.dirname(file)
-            #create output directory
-            outputedf=directory+'/edf_from_h5/'
-            if not os.path.exists(outputedf):
-                os.makedirs(outputedf)          
-            for nxs_file in self.nxs_files[0]:
-                with h5py.File(nxs_file, "r") as f:
-                    
-                    # get first object key; it corresponds to a group
-                    group = list(f.keys())[0]
-                    nb_frames=f[group+'/instrument/id02-eiger2-saxs/acquisition/nb_frames'][()]
-                    acq_time=f[group+'/instrument/id02-eiger2-saxs/acquisition/exposure_time'][()]
-                    ### RETRIEVE IMAGE DATA
-                    target=group+'/measurement/data'
-                    data = np.array(f[target])      
-                    shape=np.shape(data)
-                    num_pixel_x=shape[1]
-                    num_pixel_z=shape[2]                
-                    # check for headr info
-                    
-                    header=group+'/instrument/id02-eiger2-saxs/header'
-                    # pixel_size
-                    pixel_size_x=f[header+'/PSize_1'][()]
-                    pixel_size_z=f[header+'/PSize_2'][()]
-                    #Wavelength
-                    wl=f[header+'/WaveLength'][()]
-                    # beam center
-                    x_center=f[header+'/Center_1'][()]
-                    z_center=f[header+'/Center_2'][()]
-                    # distance
-                    distance=f[header+'/SampleDistance'][()]
-                    # monitor
-                    machine_info=f[header+'/MachineInfo'][()]
-                    current=machine_info[3:9]
-                    norm_factor=f[header+'/NormalizationFactor'][()]
-                    
-                    header='/entry_0000/instrument/id02-eiger2-saxs/image_operation/binning'
-                    bin_x=f[header+'/x'][()]
-                    bin_y=f[header+'/y'][()]
-                    
-                                    
-                    
-                header={"title":str(group),"WaveLength":float(wl),"Center_1":float(x_center),"Center_2":float(z_center),"PSize_1":float(pixel_size_x),"PSize_2":float(pixel_size_z),"SampleDistance":float(distance),"Dim_1":int(num_pixel_x),"Dim_2":int(num_pixel_z),"ExposureTime":float(acq_time),"NormalizationFactor":float(norm_factor),'MachineInfo':float(current),'Binning_1':int(bin_x),'Binning_2':int(bin_y)}
+        #try:
+        file=file_list[0]
+        directory=os.path.dirname(file)
+        #create output directory
+        outputedf=directory+'/edf_from_h5/'
+        if not os.path.exists(outputedf):
+            os.makedirs(outputedf)          
+        for nxs_file in self.nxs_files[0]:
+            with h5py.File(nxs_file, "r") as f:
                 
-                for i in range(nb_frames):
-                    data_ok=data[i,:,:]
-                    #creation ficher edf
-                    fname=Path(nxs_file).stem
-                    outputname=outputedf+fname+"_"+f'{i:{0}{4}}'+".edf"
-                    obj = fabio.edfimage.EdfImage(header=header,data=data_ok)
-                    obj.write(outputname)
-            self.ui.console_textEdit.insertPlainText("Conversion of .nxs files to .edf files completed.\n")
-            self.ui.console_textEdit.insertPlainText("Meta-data are: %s"%header+'\n')
-            redColor = QColor(255, 0, 0)
-            blackColor = QColor(0, 0, 0)
-            self.ui.console_textEdit.setTextColor(redColor)
-            self.ui.console_textEdit.insertPlainText("WARNING: DETECTOR CALIBRATION  REQUIRED\n")
-            self.ui.console_textEdit.insertPlainText("Header in the generated edf files contain calibration information (leave default parameters, simply click Apply Calibration).\n")
-            self.ui.console_textEdit.setTextColor(blackColor)
-            self.ui.console_textEdit.insertPlainText("Files are stored in %s"%outputedf+"\n")
-        except:
-            pass
+                # get first object key; it corresponds to a group
+                group = list(f.keys())[0]
+                nb_frames=f[group+'/instrument/id02-eiger2-saxs/acquisition/nb_frames'][()]
+                acq_time=f[group+'/instrument/id02-eiger2-saxs/acquisition/exposure_time'][()]
+                ### RETRIEVE IMAGE DATA
+                target=group+'/measurement/data'
+                data = np.array(f[target])      
+                shape=np.shape(data)
+                num_pixel_x=shape[1]
+                num_pixel_z=shape[2]                
+                # check for headr info
+                
+                header='/entry_0000/instrument/id02-eiger2-saxs/header'
+                # pixel_size
+                pixel_size_x=f[header+'/PSize_1'][()]
+                pixel_size_z=f[header+'/PSize_2'][()]
+                #Wavelength
+                wl=f[header+'/WaveLength'][()]
+                # beam center
+                x_center=f[header+'/Center_1'][()]
+                z_center=f[header+'/Center_2'][()]
+                # distance
+                distance=f[header+'/SampleDistance'][()]
+                # monitor
+                machine_info=f[header+'/MachineInfo'][()]
+                current=machine_info[3:9]
+                norm_factor=f[header+'/NormalizationFactor'][()]
+                
+                header='/entry_0000/instrument/id02-eiger2-saxs/image_operation/binning'
+                bin_x=f[header+'/x'][()]
+                bin_y=f[header+'/y'][()]
+                ###
+                header_title='/entry_0000/instrument/id02-eiger2-saxs/header/Title'
+                title=f[header_title][()].decode('utf-8')
+                                
+                
+            header={"title":str(title),"WaveLength":float(wl),"Center_1":float(x_center),"Center_2":float(z_center),"PSize_1":float(pixel_size_x),"PSize_2":float(pixel_size_z),"SampleDistance":float(distance),"Dim_1":int(num_pixel_x),"Dim_2":int(num_pixel_z),"ExposureTime":float(acq_time),"NormalizationFactor":float(norm_factor),'MachineInfo':float(current),'Binning_1':int(bin_x),'Binning_2':int(bin_y)}
+            
+            for i in range(nb_frames):
+                n=float(norm_factor)
+                data_ok=n*data[i,:,:]
+                #creation ficher edf
+                fname=Path(nxs_file).stem
+                outputname=outputedf+fname+"_"+f'{i:{0}{4}}'+".edf"
+                obj = fabio.edfimage.EdfImage(header=header,data=data_ok)
+                obj.write(outputname)
+        self.ui.console_textEdit.insertPlainText("Conversion of .nxs files to .edf files completed.\n")
+        self.ui.console_textEdit.insertPlainText("Meta-data are: %s"%header+'\n')
+        redColor = QColor(255, 0, 0)
+        blackColor = QColor(0, 0, 0)
+        self.ui.console_textEdit.setTextColor(redColor)
+        self.ui.console_textEdit.insertPlainText("WARNING: DETECTOR CALIBRATION  REQUIRED\n")
+        self.ui.console_textEdit.insertPlainText("Header in the generated edf files contain calibration information (leave default parameters, simply click Apply Calibration).\n")
+        self.ui.console_textEdit.setTextColor(blackColor)
+        self.ui.console_textEdit.insertPlainText("Files are stored in %s"%outputedf+"\n")
+        #except:
+        #    self.ui.console_textEdit.insertPlainText("An error occured\n")
+        #    pass
         return    
     
     def nxs2edf_id02waxs(self):
@@ -1228,13 +1236,17 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                     norm_factor=f[header+'/NormalizationFactor'][()]
                     header='/entry_0000/instrument/id02-rayonixhs-waxs/image_operation/binning'
                     bin_x=f[header+'/x'][()]
-                    bin_y=f[header+'/y'][()]                    
+                    bin_y=f[header+'/y'][()]  
+                    
+                    header_title='/entry_0000/instrument/id02-rayonixhs-waxs/header/Title'
+                    title=f[header_title][()].decode('utf-8')                   
                                     
                     
-                header={"title":str(group),"WaveLength":float(wl),"Center_1":float(x_center),"Center_2":float(z_center),"PSize_1":float(pixel_size_x),"PSize_2":float(pixel_size_z),"SampleDistance":float(distance),"Dim_1":int(num_pixel_x),"Dim_2":int(num_pixel_z),"ExposureTime":float(acq_time),"NormalizationFactor":float(norm_factor),'MachineInfo':float(current),'Binning_1':int(bin_x),'Binning_2':int(bin_y)}
+                header={"title":str(title),"WaveLength":float(wl),"Center_1":float(x_center),"Center_2":float(z_center),"PSize_1":float(pixel_size_x),"PSize_2":float(pixel_size_z),"SampleDistance":float(distance),"Dim_1":int(num_pixel_x),"Dim_2":int(num_pixel_z),"ExposureTime":float(acq_time),"NormalizationFactor":float(norm_factor),'MachineInfo':float(current),'Binning_1':int(bin_x),'Binning_2':int(bin_y)}
                 
                 for i in range(nb_frames):
-                    data_ok=data[i,:,:]
+                    n=float(norm_factor)
+                    data_ok=n*data[i,:,:]
                     #creation ficher edf
                     fname=Path(nxs_file).stem
                     outputname=outputedf+fname+"_"+f'{i:{0}{4}}'+".edf"
@@ -1315,7 +1327,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         for file in filenames:
             #print(file)
             label=Path(file).stem
-            q,i=np.loadtxt(str(file),unpack=True,skiprows=2)
+            q,i=np.loadtxt(str(file),usecols=(0,1),unpack=True)
         
             plt.loglog(q,i,label=label)
             i+=1
@@ -1335,7 +1347,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
         for file in filenames:
             #print(file)
             label=Path(file).stem
-            q,i=np.loadtxt(str(file),unpack=True,skiprows=2)
+            q,i=np.loadtxt(str(file),usecols=(0,1),unpack=True)
         
             plt.plot(q,i,label=label)
             i+=1
@@ -1457,6 +1469,52 @@ class ApplicationWindow(QtWidgets.QMainWindow):
             self.ui.console_textEdit.insertPlainText("Please provide an image file.\n")
         return
 
+    def batch_regroup_plot(self):
+        
+        filelist=QtWidgets.QFileDialog.getOpenFileNames( self,"Open 2D data file","%s"%self.path,"frames *.edf")
+        filenames=filelist[0]  
+        if a==1:
+            for file in filenames:
+                print(self.maskpathname)
+                image=fabio.open(file)
+                header=image.header
+                self.wl=float(header[self.ui.key_wl_lineEdit.text()])
+                print(self.wl)
+                self.x_center = float(header[self.ui.key_X_lineEdit.text()])
+                self.y_center = float(header[self.ui.key_Y_lineEdit.text()])
+                self.pix_size = float(header[self.ui.key_sizeX_lineEdit.text()])
+                self.distance = float(header[self.ui.key_distance_lineEdit.text()])
+                self.number_pixel_x = int(header[self.ui.key_dim1_lineEdit.text()])
+                self.number_pixel_y = int(header[self.ui.key_dim2_lineEdit.text()])            
+                output=os.path.basename(file)+"_radial_profile.dat"
+                nbins=1000
+                unit_type="q_nm^-1"
+                print(self.maskpathname)
+                mask_img=fabio.open(self.maskpathname[0])
+                maskdata=mask_img.data    
+                detector = pyFAI.detectors.Detector(pixel1=self.pix_size, pixel2=self.pix_size)
+                ai = AzimuthalIntegrator(dist=self.distance, detector=detector) 
+                ai.setFit2D(self.distance*1000,self.x_center,self.y_center,wavelength=self.wl*1e10)
+                data=image.data
+                q,i=ai.integrate1d(data,nbins,filename=output,mask=maskdata,unit=unit_type,normalization_factor=1)
+                qa=0.1*q
+                np.savetxt(output,[qa,i])
+                #q,i=np.loadtxt(output,usecols=(0,1),unpack=True)
+                #qa=0.1*q
+                label=os.path.basename(output).split('.')[0]
+                plt.figure(1)
+                plt.xlabel(r'Q (1/ $\mathrm{\AA}$ )')
+                plt.ylabel(r'I (1/cm)')            
+                plt.loglog(qa,i)
+            plt.legend()
+            plt.show()
+        else:
+            self.ui.console_textEdit.insertPlainText("Please provide mask file first. \n")
+        
+        return
+
+
+
 #fonctions pour le moyennage des images de réfèrences
         
     def average(self):
@@ -1569,7 +1627,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
             self.ui.data_file_textEdit.insertPlainText(res) 
             #self.ui.console_textEdit.insertPlainText("Sample data file provided!\n")
             if res!='':
-                self.ui.console_textEdit.insertPlainText("Sampe data file successfully provided.\n")
+                self.ui.console_textEdit.insertPlainText("Sample data file successfully provided.\n")
             else:
                 self.ui.console_textEdit.insertPlainText("No data file provided, please try again\n")            
         except:
@@ -2009,7 +2067,7 @@ class ApplicationWindow(QtWidgets.QMainWindow):
                 # Récupération des transmissions
                 I_0=float(self.ui.I0_lineEdit.text())
                 I_ref=float(self.ui.Iref_lineEdit.text())
-                Isample_array=ast.literal_eval(self.ui.Itrans_lineEdit.text())
+                Isample_array=np.fromstring(self.ui.Itrans_lineEdit.text(),dtype=float,sep=' ')
                 
                 k=0
                 
